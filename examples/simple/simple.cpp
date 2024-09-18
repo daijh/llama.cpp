@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "xtrace.h"
+
 static void print_usage(int, char ** argv) {
     LOG_TEE("\nexample usage:\n");
     LOG_TEE("\n    %s -m model.gguf -p \"Hello my name is\" -n 32\n", argv[0]);
@@ -14,6 +16,8 @@ static void print_usage(int, char ** argv) {
 }
 
 int main(int argc, char ** argv) {
+    XTRACE_CALL();
+
     gpt_params params;
 
     params.prompt = "Hello my name is";
@@ -114,6 +118,8 @@ int main(int argc, char ** argv) {
     const auto t_main_start = ggml_time_us();
 
     while (n_cur <= n_predict) {
+        XTRACE_NAME("loop");
+
         // sample the next token
         {
             const llama_token new_token_id = llama_sampler_sample(smpl, ctx, batch.n_tokens - 1);

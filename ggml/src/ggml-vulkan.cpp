@@ -26,6 +26,8 @@
 
 #include "ggml-vulkan-shaders.hpp"
 
+#include "xtrace.h"
+
 #define VK_API_VERSION VK_API_VERSION_1_2
 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
@@ -786,6 +788,8 @@ static vk_submission ggml_vk_create_submission(vk_device& device, vk_queue& q, s
 }
 
 static void ggml_vk_submit(vk_context& ctx, vk::Fence fence) {
+  XTRACE_CALL();
+
     if (ctx->seqs.empty()) {
         if (fence) {
             ctx->q->queue.submit({}, fence);
@@ -2718,6 +2722,8 @@ static void ggml_vk_buffer_write_async(vk_context subctx, vk_buffer& dst, size_t
 }
 
 static void ggml_vk_buffer_write_2d(vk_buffer& dst, size_t offset, const void * src, size_t spitch, size_t width, size_t height) {
+  XTRACE_CALL();
+
     VK_LOG_DEBUG("ggml_vk_buffer_write_2d(" << width << ", " << height << ")");
     // Buffer is already mapped
     if(dst->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
@@ -2805,6 +2811,8 @@ static void ggml_vk_buffer_read_async(vk_context subctx, vk_buffer& src, size_t 
 }
 
 static void ggml_vk_buffer_read(vk_buffer& src, size_t offset, void * dst, size_t size) {
+  XTRACE_CALL();
+
     VK_LOG_DEBUG("ggml_vk_buffer_read(" << src->buffer << ", " << offset << ", " << size << ")");
     if(src->memory_property_flags & vk::MemoryPropertyFlagBits::eHostVisible) {
         GGML_ASSERT(src->memory_property_flags & vk::MemoryPropertyFlagBits::eHostCoherent);
@@ -2837,6 +2845,8 @@ static void ggml_vk_buffer_copy_async(vk_context& ctx, vk_buffer& dst, size_t ds
 }
 
 static void ggml_vk_buffer_copy(vk_buffer& dst, size_t dst_offset, vk_buffer& src, size_t src_offset, size_t size) {
+  XTRACE_CALL();
+
     if (src->device == dst->device) {
         VK_LOG_DEBUG("ggml_vk_buffer_copy(SINGLE_DEVICE, " << size << ")");
         // Copy within the device
@@ -2863,6 +2873,8 @@ static void ggml_vk_buffer_copy(vk_buffer& dst, size_t dst_offset, vk_buffer& sr
 }
 
 static void ggml_vk_buffer_memset(vk_buffer& dst, size_t offset, uint32_t c, size_t size) {
+  XTRACE_CALL();
+
     VK_LOG_DEBUG("ggml_vk_buffer_memset(" << offset << ", " << c << ", " << size << ")");
 
     vk_context subctx = ggml_vk_create_temporary_context(dst->device->transfer_queue);
@@ -5987,6 +5999,23 @@ static bool ggml_vk_compute_forward(ggml_backend_vk_context * ctx, ggml_tensor *
 
     VK_LOG_DEBUG("ggml_vk_compute_forward(" << tensor << ", name=" << tensor->name << ", op=" << ggml_op_name(tensor->op) << ", type=" << tensor->type << ", ne0=" << tensor->ne[0] << ", ne1=" << tensor->ne[1] << ", ne2=" << tensor->ne[2] << ", ne3=" << tensor->ne[3] << ", nb0=" << tensor->nb[0] << ", nb1=" << tensor->nb[1] << ", nb2=" << tensor->nb[2] << ", nb3=" << tensor->nb[3] << ", view_src=" << tensor->view_src << ", view_offs=" << tensor->view_offs << ")");
 
+    std::ostringstream tracing_name;
+    tracing_name.str("");
+    tracing_name.clear();
+#if 0
+    tracing_name << "ggml_vk_compute_forward(" << tensor << ", name=" << tensor->name << ", op=" << ggml_op_name(tensor->op) << ", type=" << tensor->type << ", ne0=" << tensor->ne[0] << ", ne1=" << tensor->ne[1] << ", ne2=" << tensor->ne[2] << ", ne3=" << tensor->ne[3] << ", nb0=" << tensor->nb[0] << ", nb1=" << tensor->nb[1] << ", nb2=" << tensor->nb[2] << ", nb3=" << tensor->nb[3] << ", view_src=" << tensor->view_src << ", view_offs=" << tensor->view_offs << ")";
+#else
+    tracing_name << "ggml_vk_compute_forward-" << "name=" << tensor->name << "-op=" << ggml_op_name(tensor->op) << "-type=" << tensor->type;
+
+#endif
+    XTRACE_NAME(tracing_name.str().c_str());
+
+    std::ostringstream tracing_name_op;
+    tracing_name_op.str("");
+    tracing_name_op.clear();
+    tracing_name_op << "op-" << ggml_op_name(tensor->op);
+    XTRACE_NAME(tracing_name_op.str().c_str());
+
     vk_context subctx = ctx->tensor_ctxs[tensor_idx].lock();
 
     // always wait for the GPU work to be done for the last submit
@@ -6006,10 +6035,13 @@ static bool ggml_vk_compute_forward(ggml_backend_vk_context * ctx, ggml_tensor *
             memcpy(cpy.dst, cpy.src, cpy.n);
         }
 
+        use_fence = true;
         ggml_vk_submit(subctx, use_fence ? ctx->fence : vk::Fence{});
 
         if (use_fence) {
+            XTRACE_BEGIN("waitForFences");
             VK_CHECK(ctx->device->device.waitForFences({ ctx->fence }, true, UINT64_MAX), "ggml_vk_compute_forward waitForFences");
+            XTRACE_END();
 
             ctx->device->device.resetFences({ ctx->fence });
         }
@@ -6473,6 +6505,8 @@ GGML_CALL static bool ggml_backend_vk_cpy_tensor_async(ggml_backend_t backend, c
 }
 
 GGML_CALL static void ggml_backend_vk_synchronize(ggml_backend_t backend) {
+    XTRACE_CALL();
+
     VK_LOG_DEBUG("ggml_backend_vk_synchronize()");
     ggml_backend_vk_context * ctx = (ggml_backend_vk_context *)backend->context;
     if(ctx->transfer_ctx.expired()) {
@@ -6503,6 +6537,8 @@ static bool ggml_vk_is_empty(ggml_tensor * node) {
 }
 
 GGML_CALL static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backend, ggml_cgraph * cgraph) {
+    XTRACE_CALL();
+
     VK_LOG_DEBUG("ggml_backend_vk_graph_compute(" << cgraph->n_nodes << " nodes)");
     ggml_backend_vk_context * ctx = (ggml_backend_vk_context *)backend->context;
 
@@ -6526,7 +6562,7 @@ GGML_CALL static ggml_status ggml_backend_vk_graph_compute(ggml_backend_t backen
     int submit_node_idx = 0; // index to first node in a batch
 
     // submit work every submit_count node to overlap CPU cmdbuffer generation with GPU execution
-    constexpr int submit_count = 100;
+    constexpr int submit_count = 1;
     int submitted_nodes = 0;
     for (int i = 0; i < cgraph->n_nodes; i++) {
         if (first_node_in_batch) {
